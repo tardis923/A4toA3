@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>A4 → A3</title>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 Roboto, "Helvetica Neue", Arial;
+    background: linear-gradient(#f5f7fa, #e2ebf0);
+    padding: 40px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .card {
+    background: white;
+    width: 520px;
+    padding: 30px;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.1);
+  }
+
+  h2 { margin-top: 0; text-align: center; }
+
+  input, button {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    margin-top: 15px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+  }
+
+  button {
+    background: linear-gradient(135deg, #4facfe, #00f2fe);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+  }
+
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .info { margin-top: 20px; font-size: 14px; color: #555; }
+  .status { margin-top: 15px; padding: 10px; border-radius: 8px; text-align: center; font-size: 14px; }
+  .success { background: #e8f5e9; color: #2e7d32; }
+  .error { background: #ffebee; color: #c62828; }
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2>A4 → A3 合并工具</h2>
+
+  <input type="file" id="pdfInput" accept="application/pdf">
+  <button id="downloadBtn" disabled>生成并下载 A3 PDF</button>
+
+  <div class="info" id="info"></div>
+  <div class="status" id="status">请选择 PDF 文件</div>
+</div>
+
+<script>
+const { PDFDocument, StandardFonts } = PDFLib;
+
+const input = document.getElementById("pdfInput");
+const btn = document.getElementById("downloadBtn");
+const info = document.getElementById("info");
+const status = document.getElementById("status");
+
+let pdfBlob = null;
+
+input.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    btn.disabled = true;
+    status.innerText = "⏳ 正在分析 PDF...";
+    status.className = "status";
+
+    const buffer = await file.arrayBuffer();
+    const origPdf = await PDFDocument.load(buffer);
+
+    const firstPage = origPdf.getPage(0);
+    const { width, height } = firstPage.getSize();
+
+    // ✅ A3 检测
+    if (width >= 800 || height >= 1100) {
+      status.innerText = "❌ 原文件是 A3 页面，无需处理";
+      status.className = "status error";
+      return;
+    }
+
+    const A4 = [595, 842];
+    const A3_LANDSCAPE = [1191, 842];
+
+    const newPdf = await PDFDocument.create();
+    const font = await newPdf.embedFont(StandardFonts.Helvetica);
+
+    const totalA4 = origPdf.getPageCount();
+    const totalA3 = Math.ceil(totalA4 / 2);
+
+    info.innerHTML = `
+      📄 文件名：${file.name}<br>
+      📑 A4 页数：${totalA4}<br>
+      📘 A3 页数：${totalA3}
+    `;
+
+    for (let i = 0; i < totalA4; i += 2) {
+      const page = newPdf.addPage(A3_LANDSCAPE);
+
+      page.drawPage(await newPdf.embedPage(origPdf.getPage(i)), {
+        x: 0, y: 0, width: A4[0], height: A4[1]
+      });
+
+      if (i + 1 < totalA4) {
+        page.drawPage(await newPdf.embedPage(origPdf.getPage(i + 1)), {
+          x: A4[0], y: 0, width: A4[0], height: A4[1]
+        });
+      }
+
+      const text = `Page ${i / 2 + 1} / ${totalA3}`;
+      const w = font.widthOfTextAtSize(text, 14);
+
+      page.drawText(text, {
+        x: (A3_LANDSCAPE[0] - w) / 2,
+        y: 40,
+        size: 14,
+        font,
+      });
+    }
+
+    const bytes = await newPdf.save();
+    pdfBlob = new Blob([bytes], { type: "application/pdf" });
+
+    status.innerText = "✅ 处理完成，点击按钮下载";
+    status.className = "status success";
+    btn.disabled = false;
+
+  } catch (err) {
+    status.innerText = "❌ 处理失败：" + err.message;
+    status.className = "status error";
+    console.error(err);
+  }
+});
+
+btn.addEventListener("click", () => {
+  if (!pdfBlob) return;
+  const url = URL.createObjectURL(pdfBlob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "A3_output.pdf";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+
+</body>
+</html>
